@@ -1,8 +1,8 @@
 import streamlit as st
-import pandas as pd
 import json
 import time
 import io
+import csv
 from scraper import scrape_spokeo
 
 st.set_page_config(page_title="Spokeo Automator", layout="wide")
@@ -38,10 +38,7 @@ if input_mode == "Single Address":
                 else:
                     st.success("Successfully scraped data!")
                     st.json(results)
-                    
-                    # Convert to dataframe for easy copy/export
-                    df = pd.DataFrame(results)
-                    st.dataframe(df)
+                    st.dataframe(results)
             except Exception as e:
                 st.error(str(e))
 
@@ -106,35 +103,38 @@ elif input_mode == "Bulk JSON":
             
             if all_results:
                 st.success(f"Scraped {len(all_results)} contact records!")
-                df = pd.DataFrame(all_results)
                 
-                # Reorder columns to put ID first
-                cols = ['id'] + [c for c in df.columns if c != 'id']
-                df = df[cols]
+                # Reorder dict keys to put 'id' first
+                ordered_results = []
+                for r in all_results:
+                    new_r = {'id': r['id']}
+                    new_r.update(r)
+                    ordered_results.append(new_r)
+                    
+                st.dataframe(ordered_results)
                 
-                st.dataframe(df)
-                
-                # Export options
                 col1, col2 = st.columns(2)
                 
-                # Excel Export
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False)
+                # CSV Export instead of Pandas/Excel
+                output = io.StringIO()
+                if ordered_results:
+                    keys = ordered_results[0].keys()
+                    dict_writer = csv.DictWriter(output, fieldnames=keys)
+                    dict_writer.writeheader()
+                    dict_writer.writerows(ordered_results)
                 
                 with col1:
                     st.download_button(
-                        label="Download as Excel (.xlsx)",
-                        data=buffer.getvalue(),
-                        file_name="spokeo_results.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        label="Download as CSV (Excel)",
+                        data=output.getvalue(),
+                        file_name="spokeo_results.csv",
+                        mime="text/csv"
                     )
                 
-                # JSON Export
                 with col2:
                     st.download_button(
                         label="Download as JSON",
-                        data=json.dumps(all_results, indent=2),
+                        data=json.dumps(ordered_results, indent=2),
                         file_name="spokeo_results.json",
                         mime="application/json"
                     )
