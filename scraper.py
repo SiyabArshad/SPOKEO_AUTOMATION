@@ -1,33 +1,34 @@
 import os
 import re
-from playwright.sync_api import sync_playwright
+import sys
+import asyncio
+from playwright.async_api import async_playwright
+
 
 def format_url(address, city, state):
-    # Replace spaces with hyphens, remove special characters
     addr = re.sub(r'[^\w\s-]', '', address.strip())
     addr = re.sub(r'\s+', '-', addr)
     city_formatted = '-'.join([word.capitalize() for word in city.strip().lower().split(' ')])
     state_formatted = state.strip().upper()
     return f"https://www.spokeo.com/{state_formatted}/{city_formatted}/{addr}"
 
-def scrape_spokeo(address, city, state):
+
+async def _scrape_async(address, city, state):
     url = format_url(address, city, state)
-    
+
     user_data_dir = os.environ.get("CHROME_PROFILE_PATH")
     if not user_data_dir:
-        # Default Windows path
         localappdata = os.environ.get("LOCALAPPDATA", "")
         if localappdata:
             user_data_dir = os.path.join(localappdata, "Google", "Chrome", "User Data")
         else:
-            # Fallback for Mac just in case
             user_data_dir = os.path.expanduser("~/Library/Application Support/Google/Chrome")
 
     profile_dir = os.environ.get("CHROME_PROFILE_DIR", "Default")
 
-    with sync_playwright() as p:
+    async with async_playwright() as p:
         try:
-            browser = p.chromium.launch_persistent_context(
+            browser = await p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
                 channel="chrome",
                 headless=False,
@@ -38,27 +39,30 @@ def scrape_spokeo(address, city, state):
             )
         except Exception as e:
             if "has been closed" in str(e).lower() or "21" in str(e):
-                raise Exception("⛔ PROFILE LOCKED: Chrome is still running in the background! Please completely exit Chrome from the Windows System Tray (bottom right corner) before running.")
+                raise Exception(
+                    "⛔ PROFILE LOCKED: Chrome is still running in the background! "
+                    "Please completely exit Chrome from the Windows System Tray "
+                    "(bottom right corner) before running."
+                )
             raise e
 
-        page = browser.new_page()
+        page = await browser.new_page()
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(4000) # Give time for React hydration
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(4000)
 
-            page_text = page.evaluate("document.body.innerText.toLowerCase()")
+            page_text = await page.evaluate("document.body.innerText.toLowerCase()")
             if "no records found" in page_text or "could not find a match" in page_text:
-                browser.close()
+                await browser.close()
                 return []
 
-            # Execute Javascript in browser to parse DOM robustly
-            results = page.evaluate("""() => {
+            results = await page.evaluate("""() => {
                 const results = [];
                 const nameElements = document.querySelectorAll('h2, h3, .name, [class*="Name"], [class*="Title"]');
                 nameElements.forEach(nameEl => {
                     const name = nameEl.textContent.trim();
                     if (!name || name.length > 50 || name.split(' ').length > 6) return;
-                    
+
                     let card = nameEl.closest('article') || nameEl.closest('[class*="card"]');
                     if (!card && nameEl.parentElement && nameEl.parentElement.parentElement) {
                         card = nameEl.parentElement.parentElement;
@@ -68,36 +72,57 @@ def scrape_spokeo(address, city, state):
                     const cardText = card.textContent || '';
                     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
                     const emails = cardText.match(emailRegex) || [];
-                    
+
                     const phoneRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
                     const phones = cardText.match(phoneRegex) || [];
-                    
-                    const uniqueEmails = [...new Set(emails)];
-                    const uniquePhones = [...new Set(phones)];
 
-                    uniqueEmails.forEach(email => results.push({ name, type: 'email', value: email }));
-                    uniquePhones.forEach(phone => results.push({ name, type: 'phone', value: phone }));
+                    const links = card.querySelectorAll('a');
+                    const socials = [];
+                    links.forEach(link => {
+                        const href = link.href.toLowerCase();
+                        if (href.includes('facebook.com')) socials.push({ type: 'facebook', value: href });
+                        if (href.includes('instagram.com')) socials.push({ type: 'instagram', value: href });
+                    });
+
+                    [...new Set(emails)].forEach(email => results.push({ name, type: 'email', value: email }));
+                    [...new Set(phones)].forEach(phone => results.push({ name, type: 'phone', value: phone }));
+                    socials.forEach(s => results.push({ name, type: s.type, value: s.value }));
                 });
                 return results;
             }""")
-            
-            browser.close()
-            
-            # Global deduplication
+
+            await browser.close()
+
+            # Global dedup
             unique_results = []
             seen = set()
             for item in results:
-                val = item['value']
-                if item['type'] == 'phone':
-                    val = re.sub(r'[-.\s()]', '', val)
-                
+                val = re.sub(r'[-.\s()]', '', item['value']) if item['type'] == 'phone' else item['value']
                 key = f"{item['name']}-{item['type']}-{val}"
                 if key not in seen:
                     seen.add(key)
                     unique_results.append(item)
-            
+
             return unique_results
-            
+
         except Exception as e:
-            browser.close()
+            await browser.close()
             raise e
+
+
+def scrape_spokeo(address, city, state):
+    """
+    Synchronous wrapper around the async scraper.
+    Uses ProactorEventLoop explicitly to fix Python 3.14 + Windows compatibility.
+    """
+    if sys.platform == 'win32':
+        # Force ProactorEventLoop on Windows — required for subprocess support in Python 3.14
+        loop = asyncio.ProactorEventLoop()
+    else:
+        loop = asyncio.new_event_loop()
+
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_scrape_async(address, city, state))
+    finally:
+        loop.close()
