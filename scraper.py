@@ -106,14 +106,12 @@ def scrape_spokeo(address, city, state):
         results = driver.execute_script("""
             const results = [];
             const nameElements = document.querySelectorAll('h2, h3, .name, [class*="Name"], [class*="Title"]');
+            
             nameElements.forEach(nameEl => {
                 let rawName = nameEl.textContent.trim();
-                // Clean the name
                 let name = rawName.split(',')[0].replace('Highest Quality', '').trim();
                 
                 if (!name || name.length > 50 || name.split(' ').length > 6) return;
-                // Ignore headers that are just section titles
-                if (name.toLowerCase().includes('owner') || name.toLowerCase().includes('resident')) return;
 
                 let card = nameEl.closest('article') || nameEl.closest('[class*="card"]');
                 if (!card && nameEl.parentElement && nameEl.parentElement.parentElement) {
@@ -121,26 +119,34 @@ def scrape_spokeo(address, city, state):
                 }
                 if (!card) return;
 
-                // Make sure this card belongs to an Owner and not a Resident
-                let container = card.closest('section') || card.parentElement.parentElement || card;
-                let containerText = container.textContent.toLowerCase();
-                let cardTextLower = card.textContent.toLowerCase();
+                // Spokeo mashes text together when using textContent. 
+                // innerText preserves newlines, which stops regex from grabbing connected words.
+                const cardText = card.innerText || card.textContent || '';
                 
-                // If it's a resident, skip it
-                if (cardTextLower.includes('resident') || (!containerText.includes('owner') && !cardTextLower.includes('owner'))) {
-                    return;
+                // If the matched name is a section header (e.g. "Property Owners (1)"),
+                // we need to find the actual person's name inside the card.
+                if (name.toLowerCase().includes('owner')) {
+                    const lines = cardText.split('\\n').map(l => l.trim()).filter(l => l);
+                    for (let i = 0; i < lines.length; i++) {
+                        const lineLower = lines[i].toLowerCase();
+                        if (lineLower === 'current owner' || lineLower === 'past owner') {
+                            if (i + 1 < lines.length) {
+                                name = lines[i+1].split(',')[0].replace('Highest Quality', '').trim();
+                            }
+                            break;
+                        }
+                    }
                 }
 
-                // Isolate contact info area if possible, to avoid grabbing random numbers
-                const contactSection = Array.from(card.querySelectorAll('div, p, span')).find(el => 
-                    el.textContent.includes('Contact Info') || 
-                    el.textContent.includes('@')
-                );
-                
-                let searchArea = contactSection || card;
-                const cardText = searchArea.textContent || '';
+                // If it's a resident card, or the name is still a header, skip it entirely
+                const cardTextLower = cardText.toLowerCase();
+                const nameLower = name.toLowerCase();
+                if (nameLower.includes('owner') || nameLower.includes('resident') || cardTextLower.includes('resident')) {
+                    return; 
+                }
 
-                const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
+                // Restrict email regex strictly to known domains to prevent tail-end garbage
+                const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.(com|net|org|edu|gov|us|info|biz|co)/gi;
                 const emails = cardText.match(emailRegex) || [];
 
                 const phoneRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
