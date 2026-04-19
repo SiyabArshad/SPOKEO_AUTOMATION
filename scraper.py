@@ -16,6 +16,7 @@ SPOKEO_EMAIL = os.environ.get("SPOKEO_EMAIL", "admin@sanjeevanidesifoodhub.com")
 SPOKEO_PASSWORD = os.environ.get("SPOKEO_PASSWORD", "Developer@3690")
 
 LOGIN_URL = "https://www.spokeo.com/login?url=%2F"
+PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spokeo_profile")
 
 
 def format_url(address, city, state):
