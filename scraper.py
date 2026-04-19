@@ -15,6 +15,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 SPOKEO_EMAIL = os.environ.get("SPOKEO_EMAIL", "admin@sanjeevanidesifoodhub.com")
 SPOKEO_PASSWORD = os.environ.get("SPOKEO_PASSWORD", "Developer@3690")
 
+LOGIN_URL = "https://www.spokeo.com/login"
+
 # Dedicated session folder inside the project
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spokeo_profile")
 
@@ -28,7 +30,7 @@ def format_url(address, city, state):
 
 
 def get_driver():
-    """Launch Chrome with a dedicated local profile (session persists between runs)."""
+    """Launch Chrome with a dedicated local profile."""
     options = Options()
     options.add_argument(f"--user-data-dir={PROFILE_DIR}")
     options.add_argument("--profile-directory=Default")
@@ -37,7 +39,6 @@ def get_driver():
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    # Use webdriver-manager to auto-download correct ChromeDriver for Chrome 147
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -46,52 +47,51 @@ def get_driver():
     return driver
 
 
-def accept_any_popup(driver):
-    """Dismiss cookie consent / terms popups if present."""
-    selectors = [
-        "button#onetrust-accept-btn-handler",
-        "button[aria-label*='Accept']",
-        "button[aria-label*='accept']",
-        "[id*='cookie'] button",
-        "[class*='cookie'] button",
-    ]
-    for sel in selectors:
-        try:
-            btn = driver.find_element(By.CSS_SELECTOR, sel)
-            btn.click()
-            time.sleep(1)
-            return
-        except NoSuchElementException:
-            pass
+def is_logged_in(driver):
+    """Check if we are currently logged in to Spokeo."""
+    try:
+        # If a "Sign In" or "Log In" link/button is visible in header, we are NOT logged in
+        driver.find_element(By.CSS_SELECTOR, "a[href*='/login'], a[data-testid*='login'], a[data-testid*='sign']")
+        return False
+    except NoSuchElementException:
+        return True
 
 
 def perform_login(driver):
-    """Fill and submit the Spokeo login form (works on the /login page)."""
+    """Navigate to the login page and log in with credentials."""
+    print("Navigating to login page...")
+    driver.get(LOGIN_URL)
+    time.sleep(3)
+
     wait = WebDriverWait(driver, 15)
 
-    print("Filling login form...")
-
-    # Wait for email field
+    # Fill email field
+    print("Filling email...")
     email_field = wait.until(EC.presence_of_element_located(
-        (By.CSS_SELECTOR, "input[type='email'], input[name='email'], #email, input[placeholder*='Email' i]")
+        (By.CSS_SELECTOR, "input[type='email'], input[name='email'], #email")
     ))
     email_field.clear()
     email_field.send_keys(SPOKEO_EMAIL)
+    time.sleep(0.5)
 
-    # Password field
+    # Fill password field
+    print("Filling password...")
     password_field = wait.until(EC.presence_of_element_located(
         (By.CSS_SELECTOR, "input[type='password'], input[name='password'], #password")
     ))
     password_field.clear()
     password_field.send_keys(SPOKEO_PASSWORD)
+    time.sleep(0.5)
 
-    # Submit button
+    # Submit
+    print("Submitting login form...")
     submit = wait.until(EC.element_to_be_clickable(
         (By.CSS_SELECTOR, "button[type='submit'], input[type='submit']")
     ))
     submit.click()
-    print("Login submitted — waiting for redirect...")
     time.sleep(5)
+
+    print(f"After login, current URL: {driver.current_url}")
 
 
 def scrape_spokeo(address, city, state):
@@ -100,44 +100,28 @@ def scrape_spokeo(address, city, state):
 
     driver = get_driver()
     try:
-        driver.get(target_url)
-        time.sleep(4)
-
-        # Accept any cookie/terms popup
-        accept_any_popup(driver)
-        time.sleep(1)
-
-        current = driver.current_url
-        print(f"Current URL after navigation: {current}")
-
-        # If redirected to login page, log in and then go back to target
-        if "/login" in current:
-            print("Redirected to login page — performing login...")
-            perform_login(driver)
-
-            # After login, Spokeo usually redirects back automatically.
-            # If not, navigate manually to the target URL.
-            if target_url not in driver.current_url:
-                print(f"Navigating back to target: {target_url}")
-                driver.get(target_url)
-                time.sleep(5)
-
-            accept_any_popup(driver)
-
-        # Also handle inline login modal (blur overlay) on property page
-        elif "login" in driver.page_source.lower() and "blur" in driver.page_source.lower():
-            print("Login modal detected on property page — performing login...")
-            perform_login(driver)
-            time.sleep(3)
-
-        # Final wait for dynamic content to fully render
+        # Step 1: Go to homepage to check login status
+        driver.get("https://www.spokeo.com")
         time.sleep(3)
+
+        # Step 2: Login if not logged in
+        if not is_logged_in(driver):
+            print("Not logged in — logging in via login page...")
+            perform_login(driver)
+        else:
+            print("Already logged in — skipping login.")
+
+        # Step 3: Navigate to the property page
+        print(f"Navigating to property page: {target_url}")
+        driver.get(target_url)
+        time.sleep(6)  # Wait for full page render
 
         page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
         if "no records found" in page_text or "could not find a match" in page_text:
             driver.quit()
             return []
 
+        # Step 4: Extract contacts
         results = driver.execute_script("""
             const results = [];
             const nameElements = document.querySelectorAll('h2, h3, .name, [class*="Name"], [class*="Title"]');
@@ -175,7 +159,7 @@ def scrape_spokeo(address, city, state):
 
         driver.quit()
 
-        # Global dedup
+        # Dedup
         unique_results = []
         seen = set()
         for item in results:
