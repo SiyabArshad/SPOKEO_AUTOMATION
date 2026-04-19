@@ -15,8 +15,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 SPOKEO_EMAIL = os.environ.get("SPOKEO_EMAIL", "admin@sanjeevanidesifoodhub.com")
 SPOKEO_PASSWORD = os.environ.get("SPOKEO_PASSWORD", "Developer@3690")
 
-# Dedicated session folder inside the project
-PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spokeo_profile")
+LOGIN_URL = "https://www.spokeo.com/login?url=%2F"
 
 
 def format_url(address, city, state):
@@ -52,7 +51,7 @@ def ensure_logged_in(driver):
     - If already logged in → Spokeo redirects us away from /login automatically.
     """
     print("Navigating to Spokeo login page...")
-    driver.get("https://www.spokeo.com/login")
+    driver.get(LOGIN_URL)
     time.sleep(4)
 
     # Check if we are still on the login page by looking for the email input
