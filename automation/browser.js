@@ -25,7 +25,7 @@ async function getBrowserContext() {
   }
 
   const debuggingPort = 9222;
-  const endpointUrl = `http://localhost:${debuggingPort}`; // Using localhost instead of 127.0.0.1
+  const endpointUrl = `http://127.0.0.1:${debuggingPort}`; // Using 127.0.0.1 to avoid IPv6 ::1 ECONNREFUSED issues on Windows
 
   try {
     console.log(`Trying to connect to already running Chrome on ${endpointUrl}...`);
