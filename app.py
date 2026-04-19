@@ -19,7 +19,6 @@ if input_mode == "Single Address":
     col1, col2 = st.columns(2)
     with col1:
         db_id = st.text_input("Database ID (optional)")
-        marketing_id = st.text_input("Marketing Address ID (optional)")
         address = st.text_input("Address", value="1255 WESTSHORE DR")
     with col2:
         city = st.text_input("City", value="CUMMING")
@@ -30,23 +29,20 @@ if input_mode == "Single Address":
             try:
                 results = scrape_spokeo(address, city, state)
                 
-                # Append the DB IDs to the results
+                # Append the DB ID to the results
                 for r in results:
                     r['id'] = db_id
-                    r['marketing_addresses_id'] = marketing_id
                     
                 if not results:
                     st.warning("No contact data found for this address.")
                 else:
                     st.success("Successfully scraped data!")
                     
-                    # Reorder keys to put ids first
+                    # Reorder keys to put 'id' first
                     ordered_results = []
                     for r in results:
-                        new_r = {'id': r['id'], 'marketing_addresses_id': r['marketing_addresses_id']}
-                        for k, v in r.items():
-                            if k not in ['id', 'marketing_addresses_id']:
-                                new_r[k] = v
+                        new_r = {'id': r['id']}
+                        new_r.update(r)
                         ordered_results.append(new_r)
                     
                     # Display Table
@@ -89,18 +85,16 @@ if input_mode == "Single Address":
                 st.error(str(e))
 
 elif input_mode == "Bulk JSON":
-    st.markdown("Paste a JSON array of objects. Each object must have `id`, `marketing_addresses_id`, `address`, `city`, and `state`.")
+    st.markdown("Paste a JSON array of objects. Each object must have `id`, `address`, `city`, and `state`.")
     sample_json = '''[
   {
-    "id": "26fea0b7-2cea-4962-8f00-fe3d2396fb7e",
-    "marketing_addresses_id": "fd5d3013-9b55-4764-9150-a8ba96c3827a",
+    "id": "101",
     "address": "1255 WESTSHORE DR",
     "city": "CUMMING",
     "state": "GA"
   },
   {
     "id": "102",
-    "marketing_addresses_id": "202",
     "address": "100 MAIN ST",
     "city": "ATLANTA",
     "state": "GA"
@@ -130,7 +124,6 @@ elif input_mode == "Bulk JSON":
                 city = row.get('city', '')
                 state = row.get('state', '')
                 db_id = row.get('id', '')
-                marketing_id = row.get('marketing_addresses_id', '')
                 
                 status_text.text(f"Scraping {addr}, {city}, {state}...")
                 
@@ -139,7 +132,6 @@ elif input_mode == "Bulk JSON":
                     if res:
                         for r in res:
                             r['id'] = db_id
-                            r['marketing_addresses_id'] = marketing_id
                             all_results.append(r)
                 except Exception as e:
                     st.error(f"Error on {addr}: {str(e)}")
@@ -154,13 +146,11 @@ elif input_mode == "Bulk JSON":
             if all_results:
                 st.success(f"Scraped {len(all_results)} contact records!")
                 
-                # Reorder dict keys to put ids first
+                # Reorder dict keys to put 'id' first
                 ordered_results = []
                 for r in all_results:
-                    new_r = {'id': r['id'], 'marketing_addresses_id': r['marketing_addresses_id']}
-                    for k, v in r.items():
-                        if k not in ['id', 'marketing_addresses_id']:
-                            new_r[k] = v
+                    new_r = {'id': r['id']}
+                    new_r.update(r)
                     ordered_results.append(new_r)
                     
                 st.dataframe(ordered_results)
