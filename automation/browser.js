@@ -53,7 +53,9 @@ async function getBrowserContext() {
   }
 
   const launchOptions = {
-    headless: process.env.HEADLESS !== 'false', 
+    // Default to headless: false because reusing a normal Chrome profile in headless mode 
+    // often causes Chrome to crash or exit immediately (exit code 21) on Windows.
+    headless: process.env.HEADLESS === 'true', 
     args: [
       `--profile-directory=${profileDir}`,
       '--disable-blink-features=AutomationControlled',
