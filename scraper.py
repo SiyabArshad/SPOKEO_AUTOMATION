@@ -66,14 +66,15 @@ def ensure_logged_in(driver):
         email_field.send_keys(SPOKEO_EMAIL)
         time.sleep(0.5)
 
+        from selenium.webdriver.common.keys import Keys
         password_field = driver.find_element(By.CSS_SELECTOR, "input[type='password'], input[name='password'], #password")
         password_field.clear()
         password_field.send_keys(SPOKEO_PASSWORD)
         time.sleep(0.5)
 
-        submit = driver.find_element(By.CSS_SELECTOR, "button[type='submit'], input[type='submit']")
-        submit.click()
-        print("Login submitted. Waiting for redirect...")
+        # Hit ENTER on the password field to submit the form reliably
+        password_field.send_keys(Keys.RETURN)
+        print("Login submitted via ENTER key. Waiting for redirect...")
         time.sleep(6)
         print(f"Landed on: {driver.current_url}")
 
