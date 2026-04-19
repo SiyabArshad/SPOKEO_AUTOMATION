@@ -2,24 +2,7 @@ import os
 import re
 import sys
 import asyncio
-import subprocess
-import time
 from playwright.async_api import async_playwright
-
-
-def kill_chrome():
-    """Force kill all Chrome processes on Windows to release the profile lock."""
-    if sys.platform == 'win32':
-        try:
-            subprocess.run(
-                ['taskkill', '/F', '/IM', 'chrome.exe', '/T'],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            # Wait a moment for processes to fully die and release file locks
-            time.sleep(2)
-        except Exception:
-            pass
 
 
 def format_url(address, city, state):
@@ -33,47 +16,33 @@ def format_url(address, city, state):
 async def _scrape_async(address, city, state):
     url = format_url(address, city, state)
 
-    user_data_dir = os.environ.get("CHROME_PROFILE_PATH")
-    if not user_data_dir:
-        localappdata = os.environ.get("LOCALAPPDATA", "")
-        if localappdata:
-            user_data_dir = os.path.join(localappdata, "Google", "Chrome", "User Data")
-        else:
-            user_data_dir = os.path.expanduser("~/Library/Application Support/Google/Chrome")
-
-    profile_dir = os.environ.get("CHROME_PROFILE_DIR", "Default")
-
-    # Kill any existing Chrome processes first to release the profile lock
-    kill_chrome()
-
     async with async_playwright() as p:
+        # Connect to already-running Chrome (launched by run.bat with --remote-debugging-port=9222)
+        # This means we NEVER kill Chrome, we just open a new tab in it
         try:
-            browser = await p.chromium.launch_persistent_context(
-                user_data_dir=user_data_dir,
-                channel="chrome",
-                headless=False,
-                args=[
-                    f"--profile-directory={profile_dir}",
-                    "--disable-blink-features=AutomationControlled"
-                ]
-            )
+            browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
         except Exception as e:
-            if "has been closed" in str(e).lower() or "21" in str(e):
-                raise Exception(
-                    "⛔ PROFILE LOCKED: Chrome is still running in the background! "
-                    "Please completely exit Chrome from the Windows System Tray "
-                    "(bottom right corner) before running."
-                )
-            raise e
+            raise Exception(
+                "⛔ Could not connect to Chrome. "
+                "Please make sure you started the app using run.bat and Chrome is open with the debugging port. "
+                f"Details: {str(e)}"
+            )
 
-        page = await browser.new_page()
+        # Use the existing browser context (logged-in session)
+        contexts = browser.contexts
+        context = contexts[0] if contexts else await browser.new_context()
+
+        # Open a new tab for scraping
+        page = await context.new_page()
+
         try:
+            # Dismiss any "Restore pages?" dialog if it appears
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(4000)
 
             page_text = await page.evaluate("document.body.innerText.toLowerCase()")
             if "no records found" in page_text or "could not find a match" in page_text:
-                await browser.close()
+                await page.close()
                 return []
 
             results = await page.evaluate("""() => {
@@ -111,7 +80,8 @@ async def _scrape_async(address, city, state):
                 return results;
             }""")
 
-            await browser.close()
+            # Close just this tab, leave Chrome open
+            await page.close()
 
             # Global dedup
             unique_results = []
@@ -126,17 +96,13 @@ async def _scrape_async(address, city, state):
             return unique_results
 
         except Exception as e:
-            await browser.close()
+            await page.close()
             raise e
 
 
 def scrape_spokeo(address, city, state):
-    """
-    Synchronous wrapper around the async scraper.
-    Uses ProactorEventLoop explicitly to fix Python 3.14 + Windows compatibility.
-    """
+    """Sync wrapper using ProactorEventLoop for Python 3.14 Windows compatibility."""
     if sys.platform == 'win32':
-        # Force ProactorEventLoop on Windows — required for subprocess support in Python 3.14
         loop = asyncio.ProactorEventLoop()
     else:
         loop = asyncio.new_event_loop()
