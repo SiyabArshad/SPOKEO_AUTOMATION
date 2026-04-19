@@ -16,33 +16,39 @@ def format_url(address, city, state):
 async def _scrape_async(address, city, state):
     url = format_url(address, city, state)
 
+    user_data_dir = os.environ.get("CHROME_PROFILE_PATH")
+    if not user_data_dir:
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        if localappdata:
+            user_data_dir = os.path.join(localappdata, "Google", "Chrome", "User Data")
+        else:
+            user_data_dir = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+
+    profile_dir = os.environ.get("CHROME_PROFILE_DIR", "Default")
+
     async with async_playwright() as p:
-        # Connect to already-running Chrome (launched by run.bat with --remote-debugging-port=9222)
-        # This means we NEVER kill Chrome, we just open a new tab in it
+        browser = await p.chromium.launch_persistent_context(
+            user_data_dir=user_data_dir,
+            channel="chrome",
+            headless=False,
+            args=[
+                f"--profile-directory={profile_dir}",
+                "--disable-blink-features=AutomationControlled",
+                "--restore-last-session=false",       # Suppress "Restore pages?" popup
+                "--disable-session-crashed-bubble",   # Suppress crash recovery bubble
+                "--no-first-run",
+                "--no-default-browser-check",
+            ]
+        )
+
+        page = await browser.new_page()
         try:
-            browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
-        except Exception as e:
-            raise Exception(
-                "⛔ Could not connect to Chrome. "
-                "Please make sure you started the app using run.bat and Chrome is open with the debugging port. "
-                f"Details: {str(e)}"
-            )
-
-        # Use the existing browser context (logged-in session)
-        contexts = browser.contexts
-        context = contexts[0] if contexts else await browser.new_context()
-
-        # Open a new tab for scraping
-        page = await context.new_page()
-
-        try:
-            # Dismiss any "Restore pages?" dialog if it appears
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(4000)
 
             page_text = await page.evaluate("document.body.innerText.toLowerCase()")
             if "no records found" in page_text or "could not find a match" in page_text:
-                await page.close()
+                await browser.close()
                 return []
 
             results = await page.evaluate("""() => {
@@ -80,10 +86,8 @@ async def _scrape_async(address, city, state):
                 return results;
             }""")
 
-            # Close just this tab, leave Chrome open
-            await page.close()
+            await browser.close()
 
-            # Global dedup
             unique_results = []
             seen = set()
             for item in results:
@@ -96,7 +100,7 @@ async def _scrape_async(address, city, state):
             return unique_results
 
         except Exception as e:
-            await page.close()
+            await browser.close()
             raise e
 
 
