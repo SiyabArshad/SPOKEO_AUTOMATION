@@ -64,12 +64,21 @@ A backend service that automates the retrieval of property owner contact data fr
 
 ### Request Example
 
-```json
-{
+**Mac / Linux:**
+```bash
+curl -X POST http://localhost:3000/lookup-address \
+-H "Content-Type: application/json" \
+-d '{
   "address": "1255 WESTSHORE DR",
   "city": "CUMMING",
   "state": "GA"
-}
+}'
+```
+
+**Windows (Command Prompt / PowerShell):**
+It is easiest to run this as a single line in Windows:
+```cmd
+curl -X POST http://localhost:3000/lookup-address -H "Content-Type: application/json" -d "{\"address\": \"1255 WESTSHORE DR\", \"city\": \"CUMMING\", \"state\": \"GA\"}"
 ```
 
 ### Response Example (Success)
