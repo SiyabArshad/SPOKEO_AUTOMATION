@@ -105,35 +105,51 @@ def scrape_spokeo(address, city, state):
         # Extract contacts
         results = driver.execute_script("""
             const results = [];
-            const nameElements = document.querySelectorAll('h2, h3, .name, [class*="Name"], [class*="Title"]');
-            nameElements.forEach(nameEl => {
-                const name = nameEl.textContent.trim();
-                if (!name || name.length > 50 || name.split(' ').length > 6) return;
-
-                let card = nameEl.closest('article') || nameEl.closest('[class*="card"]');
-                if (!card && nameEl.parentElement && nameEl.parentElement.parentElement) {
-                    card = nameEl.parentElement.parentElement;
-                }
-                if (!card) return;
-
-                const cardText = card.textContent || '';
-                const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
-                const emails = cardText.match(emailRegex) || [];
-
-                const phoneRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
-                const phones = cardText.match(phoneRegex) || [];
-
-                const links = card.querySelectorAll('a');
-                const socials = [];
-                links.forEach(link => {
-                    const href = link.href.toLowerCase();
-                    if (href.includes('facebook.com')) socials.push({ type: 'facebook', value: href });
-                    if (href.includes('instagram.com')) socials.push({ type: 'instagram', value: href });
+            
+            // Look specifically for owner cards (Current and Past Owners)
+            const sections = document.querySelectorAll('section');
+            sections.forEach(section => {
+                const sectionTitle = section.querySelector('h2, h3');
+                if (!sectionTitle) return;
+                
+                const titleText = sectionTitle.textContent.toLowerCase();
+                // Only process Property Owners and Past Owners
+                if (!titleText.includes('owner')) return;
+                
+                const ownerCards = section.querySelectorAll('article, [class*="card"]');
+                ownerCards.forEach(card => {
+                    // Try to find the person's name
+                    // Often inside an element with class containing 'name' or just the strongest text
+                    let nameEl = card.querySelector('[class*="name" i], strong, h3, h4');
+                    if (!nameEl) return;
+                    
+                    // Clean the name (remove "Age XX", "Highest Quality", etc.)
+                    let rawName = nameEl.textContent.trim();
+                    let name = rawName.split(',')[0].replace('Highest Quality', '').trim();
+                    
+                    if (!name || name.length > 50 || name.split(' ').length > 6) return;
+                    
+                    // Look for contact info specifically
+                    const contactSection = Array.from(card.querySelectorAll('div, p, span')).find(el => 
+                        el.textContent.includes('Contact Info') || 
+                        el.textContent.includes('@') || 
+                        el.textContent.match(/\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/)
+                    );
+                    
+                    let searchArea = contactSection || card;
+                    const cardText = searchArea.textContent || '';
+                    
+                    // Extract Emails cleanly
+                    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
+                    const emails = cardText.match(emailRegex) || [];
+                    
+                    // Extract Phones cleanly
+                    const phoneRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
+                    const phones = cardText.match(phoneRegex) || [];
+                    
+                    [...new Set(emails)].forEach(e => results.push({ name, type: 'email', value: e }));
+                    [...new Set(phones)].forEach(p => results.push({ name, type: 'phone', value: p }));
                 });
-
-                [...new Set(emails)].forEach(e => results.push({ name, type: 'email', value: e }));
-                [...new Set(phones)].forEach(p => results.push({ name, type: 'phone', value: p }));
-                socials.forEach(s => results.push({ name, type: s.type, value: s.value }));
             });
             return results;
         """)
