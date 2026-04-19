@@ -37,8 +37,50 @@ if input_mode == "Single Address":
                     st.warning("No contact data found for this address.")
                 else:
                     st.success("Successfully scraped data!")
-                    st.json(results)
-                    st.dataframe(results)
+                    
+                    # Reorder keys to put 'id' first
+                    ordered_results = []
+                    for r in results:
+                        new_r = {'id': r['id']}
+                        new_r.update(r)
+                        ordered_results.append(new_r)
+                    
+                    # Display Table
+                    st.subheader("Data Table")
+                    st.dataframe(ordered_results, use_container_width=True)
+                    
+                    # Download Buttons
+                    col_dl1, col_dl2 = st.columns(2)
+                    
+                    # CSV generation
+                    output = io.StringIO()
+                    keys = ordered_results[0].keys()
+                    dict_writer = csv.DictWriter(output, fieldnames=keys)
+                    dict_writer.writeheader()
+                    dict_writer.writerows(ordered_results)
+                    
+                    with col_dl1:
+                        st.download_button(
+                            label="📥 Download as CSV (Excel)",
+                            data=output.getvalue(),
+                            file_name="spokeo_single_result.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    
+                    with col_dl2:
+                        st.download_button(
+                            label="📥 Download as JSON",
+                            data=json.dumps(ordered_results, indent=2),
+                            file_name="spokeo_single_result.json",
+                            mime="application/json",
+                            use_container_width=True
+                        )
+                    
+                    # Copyable JSON block
+                    st.subheader("Raw JSON (Click copy icon in top right)")
+                    st.code(json.dumps(ordered_results, indent=2), language="json")
+                    
             except Exception as e:
                 st.error(str(e))
 
