@@ -1,118 +1,40 @@
-# SPOKEO_AUTOMATION
+# SPOKEO_AUTOMATION (Python/Streamlit Version)
 
-A backend service that automates the retrieval of property owner contact data from Spokeo using a pre-authenticated Chrome profile via Playwright.
+A Python-based visual application that automates the retrieval of property owner contact data from Spokeo using a pre-authenticated Chrome profile via Playwright.
 
 ## Prerequisites
 
-- Node.js installed
-- Google Chrome installed and logged into Spokeo under the desired profile (e.g., "Learn2")
-- The Chrome user data directory path
+- Python 3.9+ installed
+- Google Chrome installed and logged into Spokeo under the desired profile
 
-## Setup & Run
+## Setup
 
 1. **Install Dependencies:**
+   Open your Windows Command Prompt or PowerShell and run:
    ```bash
-   npm install
+   pip install -r requirements.txt
+   playwright install chromium
    ```
 
-2. **Configure Environment Variables:**
-   The application attempts to use your system's default Chrome directory automatically, but you should explicitly set the path to your existing Chrome profile if needed.
+2. **Configure Environment Variables (Optional):**
+   The application automatically attempts to find your default Windows Chrome profile. If you need a specific profile, you can set it before running:
    
-   **How to find your Profile Path (Windows & Mac):**
-   1. Open Google Chrome and switch to the profile you want to use (e.g., "Learn2").
-   2. Type `chrome://version` in the URL bar and press Enter.
-   3. Look for the **Profile Path** field. 
-      - *Windows Example:* `C:\Users\<YourUsername>\AppData\Local\Google\Chrome\User Data\Profile 2`
-      - *Mac Example:* `/Users/<YourUsername>/Library/Application Support/Google/Chrome/Profile 2`
-   
-   The `CHROME_PROFILE_PATH` is everything **before** the last folder.
-   The `CHROME_PROFILE_DIR` is the **last folder** (e.g., `Profile 2` or `Default`).
-
-   Set the following environment variables when running the server:
-   
-   **For Windows (Command Prompt):**
    ```cmd
-   set CHROME_PROFILE_PATH=C:\Users\<YourUsername>\AppData\Local\Google\Chrome\User Data
    set CHROME_PROFILE_DIR=Profile 2
    ```
 
-   **For Windows (PowerShell):**
-   ```powershell
-   $env:CHROME_PROFILE_PATH="C:\Users\<YourUsername>\AppData\Local\Google\Chrome\User Data"
-   $env:CHROME_PROFILE_DIR="Profile 2"
-   ```
+## Running the App
 
-   **For Mac/Linux:**
+1. **CRITICAL STEP:** You must completely close all Google Chrome windows. Additionally, you must exit Chrome from the Windows System Tray (bottom right corner, next to the clock) because Chrome runs in the background and locks your profile.
+2. **Start Streamlit:**
    ```bash
-   export CHROME_PROFILE_PATH="/Users/<YOUR_USERNAME>/Library/Application Support/Google/Chrome"
-   export CHROME_PROFILE_DIR="Profile 2"
+   streamlit run app.py
    ```
+3. A browser window will open automatically showing the user interface.
 
-   *Optional:* Set `HEADLESS=false` to see the browser visibly.
-   ```bash
-   export HEADLESS=false
-   ```
+## Features
 
-3. **Start the Server:**
-   ```bash
-   npm start
-   ```
-
-## API Specification
-
-**Endpoint:** `POST /lookup-address`
-
-### Request Example
-
-**Mac / Linux:**
-```bash
-curl -X POST http://localhost:3000/lookup-address \
--H "Content-Type: application/json" \
--d '{
-  "address": "1255 WESTSHORE DR",
-  "city": "CUMMING",
-  "state": "GA"
-}'
-```
-
-**Windows (Command Prompt / PowerShell):**
-It is easiest to run this as a single line in Windows:
-```cmd
-curl -X POST http://localhost:3000/lookup-address -H "Content-Type: application/json" -d "{\"address\": \"1255 WESTSHORE DR\", \"city\": \"CUMMING\", \"state\": \"GA\"}"
-```
-
-### Response Example (Success)
-
-```json
-[
-  {
-    "name": "John Doe",
-    "type": "phone",
-    "value": "1234567890"
-  },
-  {
-    "name": "John Doe",
-    "type": "email",
-    "value": "example@email.com"
-  }
-]
-```
-
-### Response Example (No Data / Error)
-
-```json
-{
-  "error": "No data found"
-}
-```
-
-## How It Works
-
-- The service listens for requests and formats the address to match Spokeo's URL pattern.
-- A Playwright persistent context connects to your existing Chrome profile, bypassing the need for a login flow.
-- A scraper algorithm parses the generated HTML locally to find people and their associated contact information (emails, phones, socials), applying deduplication.
-- A random delay (2–5 seconds) is automatically added between consecutive requests to handle basic rate limiting.
-
-## Note on Selectors
-
-Spokeo's DOM is highly dynamic. The scraper uses generalized heuristics to locate owner names and parse text contents for emails/phones. If Spokeo fundamentally changes their UI, the scraping logic inside `automation/scraper.js` may need to be adjusted.
+- **Single Address:** Test one address at a time. No pause.
+- **Bulk JSON:** Paste a JSON array of requests. Automatically pauses 3 seconds between requests to respect rate limits.
+- **Data Export:** View data in a copyable table, or download directly to **Excel (.xlsx)** or **JSON**.
+- **Database IDs:** Send a custom `id` with your request and it will be attached to every extracted contact so you can map it back to your database!
