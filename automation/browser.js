@@ -36,11 +36,23 @@ async function getBrowserContext() {
   console.log(`Launching persistent browser context from: ${userDataDir}`);
   console.log(`Using profile directory: ${profileDir}`);
 
-  // Launch persistent context
-  // Headless mode can sometimes interfere with logged-in sessions or trigger captchas.
-  // Using headless: "new" or false depending on the environment. We'll use headless: true by default, 
-  // but it can be overridden.
-  browserContext = await chromium.launchPersistentContext(userDataDir, {
+  // Auto-detect local Chrome executable to avoid needing "npx playwright install" 
+  // and to avoid version mismatch with the user's profile
+  let executablePath = process.env.CHROME_EXECUTABLE_PATH || '';
+  if (!executablePath) {
+    if (process.platform === 'win32') {
+      const winPaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+      ];
+      executablePath = winPaths.find(p => fs.existsSync(p)) || '';
+    } else if (process.platform === 'darwin') {
+      const macPath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+      if (fs.existsSync(macPath)) executablePath = macPath;
+    }
+  }
+
+  const launchOptions = {
     headless: process.env.HEADLESS !== 'false', 
     args: [
       `--profile-directory=${profileDir}`,
@@ -48,9 +60,19 @@ async function getBrowserContext() {
       '--no-sandbox',
       '--disable-setuid-sandbox'
     ],
-    // Helps bypass basic automation detection
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-  });
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  };
+
+  if (executablePath) {
+    launchOptions.channel = 'chrome'; // Using local chrome
+    launchOptions.executablePath = executablePath;
+    console.log(`Using local Chrome executable at: ${executablePath}`);
+  } else {
+    console.log('No local Chrome found, relying on Playwright bundled browser...');
+  }
+
+  // Launch persistent context
+  browserContext = await chromium.launchPersistentContext(userDataDir, launchOptions);
 
   return browserContext;
 }
