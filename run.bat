@@ -5,7 +5,7 @@ echo ========================================================
 echo.
 
 echo [1/2] Installing/Verifying Python dependencies...
-python -m pip install streamlit selenium undetected-chromedriver -q
+python -m pip install streamlit selenium undetected-chromedriver setuptools -q
 
 echo.
 echo [2/2] Starting Streamlit...
