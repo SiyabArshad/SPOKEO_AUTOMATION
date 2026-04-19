@@ -42,129 +42,91 @@ def get_driver():
     return driver
 
 
-def accept_cookie_popup(driver):
-    """Dismiss any cookie consent or terms popup if present."""
-    cookie_selectors = [
+def accept_any_popup(driver):
+    """Dismiss cookie consent / terms popups if present."""
+    selectors = [
         "button#onetrust-accept-btn-handler",
         "button[aria-label*='Accept']",
         "button[aria-label*='accept']",
         "[id*='cookie'] button",
         "[class*='cookie'] button",
-        "button[data-testid*='accept']",
     ]
-    for selector in cookie_selectors:
+    for sel in selectors:
         try:
-            btn = driver.find_element(By.CSS_SELECTOR, selector)
+            btn = driver.find_element(By.CSS_SELECTOR, sel)
             btn.click()
-            print(f"Accepted cookie popup via: {selector}")
             time.sleep(1)
             return
         except NoSuchElementException:
             pass
 
 
-def handle_login_modal(driver):
-    """
-    If a login modal/popup is visible on the page, fill in credentials and submit.
-    Returns True if login was performed, False if not needed.
-    """
-    time.sleep(3)
-    
-    # Common login modal selectors on Spokeo
-    login_modal_selectors = [
-        "input[type='email']",
-        "input[name='email']",
-        "#email",
-        "input[placeholder*='email' i]",
-        "input[placeholder*='Email' i]",
-    ]
+def perform_login(driver):
+    """Fill and submit the Spokeo login form (works on the /login page)."""
+    wait = WebDriverWait(driver, 15)
 
-    email_field = None
-    for selector in login_modal_selectors:
-        try:
-            email_field = WebDriverWait(driver, 5).until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, selector))
-            )
-            break
-        except TimeoutException:
-            pass
+    print("Filling login form...")
 
-    if email_field is None:
-        print("No login form found — already logged in.")
-        return False
-
-    print("Login form detected — filling in credentials...")
-
-    # Fill email
+    # Wait for email field
+    email_field = wait.until(EC.presence_of_element_located(
+        (By.CSS_SELECTOR, "input[type='email'], input[name='email'], #email, input[placeholder*='Email' i]")
+    ))
     email_field.clear()
     email_field.send_keys(SPOKEO_EMAIL)
 
-    # Fill password
-    password_selectors = [
-        "input[type='password']",
-        "input[name='password']",
-        "#password",
-        "input[placeholder*='password' i]",
-    ]
-    password_field = None
-    for selector in password_selectors:
-        try:
-            password_field = driver.find_element(By.CSS_SELECTOR, selector)
-            break
-        except NoSuchElementException:
-            pass
+    # Password field
+    password_field = wait.until(EC.presence_of_element_located(
+        (By.CSS_SELECTOR, "input[type='password'], input[name='password'], #password")
+    ))
+    password_field.clear()
+    password_field.send_keys(SPOKEO_PASSWORD)
 
-    if password_field:
-        password_field.clear()
-        password_field.send_keys(SPOKEO_PASSWORD)
-
-    # Submit
-    submit_selectors = [
-        "button[type='submit']",
-        "input[type='submit']",
-        "button[class*='login' i]",
-        "button[class*='sign' i]",
-        "button[data-testid*='login']",
-        "button[data-testid*='submit']",
-    ]
-    for selector in submit_selectors:
-        try:
-            btn = driver.find_element(By.CSS_SELECTOR, selector)
-            btn.click()
-            print("Login submitted.")
-            time.sleep(5)
-            return True
-        except NoSuchElementException:
-            pass
-
-    print("Warning: Could not find submit button.")
-    return False
+    # Submit button
+    submit = wait.until(EC.element_to_be_clickable(
+        (By.CSS_SELECTOR, "button[type='submit'], input[type='submit']")
+    ))
+    submit.click()
+    print("Login submitted — waiting for redirect...")
+    time.sleep(5)
 
 
 def scrape_spokeo(address, city, state):
-    url = format_url(address, city, state)
-    print(f"Navigating to: {url}")
+    target_url = format_url(address, city, state)
+    print(f"Target URL: {target_url}")
 
     driver = get_driver()
     try:
-        # Go directly to the property page
-        driver.get(url)
+        driver.get(target_url)
         time.sleep(4)
 
-        # Accept any cookie popup first
-        accept_cookie_popup(driver)
+        # Accept any cookie/terms popup
+        accept_any_popup(driver)
+        time.sleep(1)
 
-        # Check for and handle any login modal/popup
-        handle_login_modal(driver)
+        current = driver.current_url
+        print(f"Current URL after navigation: {current}")
 
-        # After login, we may still be on the page or redirected back — re-navigate if needed
-        if driver.current_url != url:
-            print(f"Redirected after login. Navigating back to: {url}")
-            driver.get(url)
-            time.sleep(5)
-            accept_cookie_popup(driver)
+        # If redirected to login page, log in and then go back to target
+        if "/login" in current:
+            print("Redirected to login page — performing login...")
+            perform_login(driver)
 
-        # Wait for the main body content
+            # After login, Spokeo usually redirects back automatically.
+            # If not, navigate manually to the target URL.
+            if target_url not in driver.current_url:
+                print(f"Navigating back to target: {target_url}")
+                driver.get(target_url)
+                time.sleep(5)
+
+            accept_any_popup(driver)
+
+        # Also handle inline login modal (blur overlay) on property page
+        elif "login" in driver.page_source.lower() and "blur" in driver.page_source.lower():
+            print("Login modal detected on property page — performing login...")
+            perform_login(driver)
+            time.sleep(3)
+
+        # Final wait for dynamic content to fully render
         time.sleep(3)
 
         page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
