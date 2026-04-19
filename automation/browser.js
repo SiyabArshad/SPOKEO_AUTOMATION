@@ -1,11 +1,9 @@
 const { chromium } = require('playwright');
+const { execSync, spawn } = require('child_process');
+const fs = require('fs');
 
 let browserContext = null;
 
-/**
- * Connects to an already running Chrome instance over CDP.
- * This completely prevents the Windows "Exit Code 21" profile locking error.
- */
 async function getBrowserContext() {
   if (browserContext) {
     return browserContext;
@@ -14,34 +12,57 @@ async function getBrowserContext() {
   const debuggingPort = 9222;
   const endpointUrl = `http://127.0.0.1:${debuggingPort}`;
 
-  console.log(`Connecting to running Chrome on ${endpointUrl}...`);
-
   try {
-    // Connect to the already running Chrome window
+    console.log(`Trying to connect to already running Chrome on ${endpointUrl}...`);
     const browser = await chromium.connectOverCDP(endpointUrl);
-    
-    // Grab the existing context (your normal browsing session)
     browserContext = browser.contexts()[0];
-    
-    if (!browserContext) {
-        browserContext = await browser.newContext();
-    }
-
-    console.log("Successfully connected to your running Chrome session!");
+    if (!browserContext) browserContext = await browser.newContext();
+    console.log("Successfully connected to running Chrome session!");
     return browserContext;
-
   } catch (error) {
-    console.error(`\n================================================================`);
-    console.error(`ERROR: Could not connect to Chrome.`);
-    console.error(`\nTo fix "Exit Code 21" and profile locking, you must start Chrome manually with a debugging port.`);
-    console.error(`\nPlease follow these exact steps:`);
-    console.error(`1. Completely close ALL normal Google Chrome windows.`);
-    console.error(`2. Open Windows Command Prompt (cmd) and run this exact command:`);
-    console.error(`   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222`);
-    console.error(`3. Chrome will open. Leave it open!`);
-    console.error(`4. Finally, start this Node server again (npm start)`);
-    console.error(`================================================================\n`);
-    throw new Error("Chrome is not running with --remote-debugging-port=9222");
+    console.log("Chrome debugging port is not open. Attempting to automatically start it...");
+
+    if (process.platform === 'win32') {
+      try {
+        console.log("Killing any background Chrome processes to release the profile lock...");
+        execSync('taskkill /F /IM chrome.exe /T', { stdio: 'ignore' });
+      } catch (e) {
+        // Ignore errors if Chrome is already closed
+      }
+
+      const winPaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+      ];
+      const chromePath = winPaths.find(p => fs.existsSync(p));
+
+      if (!chromePath) {
+          throw new Error("Could not find Google Chrome installation.");
+      }
+
+      console.log(`Launching Chrome from: ${chromePath}`);
+      const chromeProc = spawn(`"${chromePath}"`, ['--remote-debugging-port=9222'], {
+        detached: true,
+        shell: true,
+        stdio: 'ignore'
+      });
+      chromeProc.unref();
+
+      console.log("Waiting 3 seconds for Chrome to initialize...");
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      try {
+        const browser = await chromium.connectOverCDP(endpointUrl);
+        browserContext = browser.contexts()[0];
+        if (!browserContext) browserContext = await browser.newContext();
+        console.log("Successfully connected to newly launched Chrome session!");
+        return browserContext;
+      } catch (finalErr) {
+        throw new Error("Still could not connect to Chrome after launching it automatically.");
+      }
+    } else {
+      throw new Error("Please launch Chrome manually with --remote-debugging-port=9222");
+    }
   }
 }
 
