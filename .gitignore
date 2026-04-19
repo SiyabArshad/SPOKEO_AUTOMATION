@@ -16,6 +16,9 @@ venv.bak/
 # Streamlit
 .streamlit/
 
+# Chrome session (local only, never commit)
+spokeo_profile/
+
 # OS generated files
 .DS_Store
 .DS_Store?

@@ -1,13 +1,19 @@
 import os
 import re
-import sys
 import time
-import subprocess
 
-import undetected_chromedriver as uc
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+
+# Credentials
+SPOKEO_EMAIL = os.environ.get("SPOKEO_EMAIL", "admin@sanjeevanidesifoodhub.com")
+SPOKEO_PASSWORD = os.environ.get("SPOKEO_PASSWORD", "Developer@3690")
+
+# Store session in a local profile folder inside the project
+PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spokeo_profile")
 
 
 def format_url(address, city, state):
@@ -18,57 +24,72 @@ def format_url(address, city, state):
     return f"https://www.spokeo.com/{state_formatted}/{city_formatted}/{addr}"
 
 
-def kill_chrome():
-    """Force-kill all Chrome processes on Windows to release the profile lock."""
-    if sys.platform == 'win32':
-        try:
-            subprocess.run(
-                ['taskkill', '/F', '/IM', 'chrome.exe', '/T'],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            time.sleep(3)
-        except Exception:
-            pass
+def get_driver():
+    """Launch Chrome with a dedicated local profile (session persists between runs)."""
+    options = Options()
+    options.add_argument(f"--user-data-dir={PROFILE_DIR}")
+    options.add_argument("--profile-directory=Default")
+    options.add_argument("--no-first-run")
+    options.add_argument("--no-default-browser-check")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    # Run headless=False so Chrome window is visible (required for real session)
+    driver = webdriver.Chrome(options=options)
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+    return driver
+
+
+def ensure_logged_in(driver):
+    """Check if logged into Spokeo. If not, perform login."""
+    driver.get("https://www.spokeo.com")
+    time.sleep(3)
+
+    # Check for a sign-in button — if visible, we are logged out
+    page_source = driver.page_source.lower()
+    if "sign in" in page_source or "log in" in page_source:
+        print("Not logged in — performing login...")
+        driver.get("https://www.spokeo.com/login")
+        time.sleep(2)
+
+        wait = WebDriverWait(driver, 15)
+
+        email_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='email'], #email")))
+        email_field.clear()
+        email_field.send_keys(SPOKEO_EMAIL)
+
+        password_field = driver.find_element(By.CSS_SELECTOR, "input[type='password'], input[name='password'], #password")
+        password_field.clear()
+        password_field.send_keys(SPOKEO_PASSWORD)
+
+        # Click submit
+        submit = driver.find_element(By.CSS_SELECTOR, "button[type='submit'], input[type='submit'], .login-btn, .sign-in-btn")
+        submit.click()
+
+        time.sleep(4)
+        print("Login submitted. Session saved for future runs.")
+    else:
+        print("Already logged in — using saved session.")
 
 
 def scrape_spokeo(address, city, state):
     url = format_url(address, city, state)
+    print(f"Navigating to: {url}")
 
-    # Resolve Chrome profile path
-    user_data_dir = os.environ.get("CHROME_PROFILE_PATH")
-    if not user_data_dir:
-        localappdata = os.environ.get("LOCALAPPDATA", "")
-        if localappdata:
-            user_data_dir = os.path.join(localappdata, "Google", "Chrome", "User Data")
-        else:
-            user_data_dir = os.path.expanduser("~/Library/Application Support/Google/Chrome")
-
-    profile_dir = os.environ.get("CHROME_PROFILE_DIR", "Default")
-
-    # Kill any existing Chrome to release the profile lock before launching
-    kill_chrome()
-
-    options = uc.ChromeOptions()
-    options.add_argument(f"--user-data-dir={user_data_dir}")
-    options.add_argument(f"--profile-directory={profile_dir}")
-    options.add_argument("--no-first-run")
-    options.add_argument("--no-default-browser-check")
-    options.add_argument("--restore-last-session=false")
-    options.add_argument("--disable-session-crashed-bubble")
-
-    driver = uc.Chrome(options=options, headless=False)
-
+    driver = get_driver()
     try:
+        ensure_logged_in(driver)
+
         driver.get(url)
-        time.sleep(5)  # Wait for dynamic content to load
+        time.sleep(5)  # Wait for dynamic content
 
         page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
         if "no records found" in page_text or "could not find a match" in page_text:
             driver.quit()
             return []
 
-        # Extract contacts via JavaScript
         results = driver.execute_script("""
             const results = [];
             const nameElements = document.querySelectorAll('h2, h3, .name, [class*="Name"], [class*="Title"]');
@@ -97,8 +118,8 @@ def scrape_spokeo(address, city, state):
                     if (href.includes('instagram.com')) socials.push({ type: 'instagram', value: href });
                 });
 
-                [...new Set(emails)].forEach(email => results.push({ name, type: 'email', value: email }));
-                [...new Set(phones)].forEach(phone => results.push({ name, type: 'phone', value: phone }));
+                [...new Set(emails)].forEach(e => results.push({ name, type: 'email', value: e }));
+                [...new Set(phones)].forEach(p => results.push({ name, type: 'phone', value: p }));
                 socials.forEach(s => results.push({ name, type: s.type, value: s.value }));
             });
             return results;
