@@ -2,7 +2,24 @@ import os
 import re
 import sys
 import asyncio
+import subprocess
+import time
 from playwright.async_api import async_playwright
+
+
+def kill_chrome():
+    """Force kill all Chrome processes on Windows to release the profile lock."""
+    if sys.platform == 'win32':
+        try:
+            subprocess.run(
+                ['taskkill', '/F', '/IM', 'chrome.exe', '/T'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            # Wait a moment for processes to fully die and release file locks
+            time.sleep(2)
+        except Exception:
+            pass
 
 
 def format_url(address, city, state):
@@ -25,6 +42,9 @@ async def _scrape_async(address, city, state):
             user_data_dir = os.path.expanduser("~/Library/Application Support/Google/Chrome")
 
     profile_dir = os.environ.get("CHROME_PROFILE_DIR", "Default")
+
+    # Kill any existing Chrome processes first to release the profile lock
+    kill_chrome()
 
     async with async_playwright() as p:
         try:
