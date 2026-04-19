@@ -1,95 +1,71 @@
 const { chromium } = require('playwright');
-const { execSync, spawn } = require('child_process');
 const fs = require('fs');
-const http = require('http');
+const path = require('path');
+const { execSync } = require('child_process');
 
 let browserContext = null;
 
-// Helper to check if the port is responding
-function checkDebuggingPort(url) {
-  return new Promise((resolve) => {
-    http.get(`${url}/json/version`, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => resolve(true));
-    }).on('error', (err) => {
-      console.log(`Port check failed: ${err.message}`);
-      resolve(false);
-    });
-  });
-}
-
 async function getBrowserContext() {
-  if (browserContext) {
-    return browserContext;
+  if (browserContext) return browserContext;
+
+  const profileDir = process.env.CHROME_PROFILE_DIR || 'Default';
+  let userDataDir = process.env.CHROME_PROFILE_PATH;
+
+  if (!userDataDir) {
+    if (process.platform === 'win32') {
+      userDataDir = path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
+    } else {
+      userDataDir = path.join(process.env.HOME || '', 'Library/Application Support/Google/Chrome');
+    }
   }
 
-  const debuggingPort = 9222;
-  const endpointUrl = `http://127.0.0.1:${debuggingPort}`; // Using 127.0.0.1 to avoid IPv6 ::1 ECONNREFUSED issues on Windows
+  if (process.platform === 'win32') {
+      try {
+          console.log("Attempting to kill background Chrome processes...");
+          execSync('taskkill /F /IM chrome.exe /T', { stdio: 'ignore' });
+      } catch (e) {
+          // Ignore
+      }
+  }
+
+  console.log(`Launching Chrome from user data dir: ${userDataDir}`);
+  console.log(`Target Profile: ${profileDir}`);
 
   try {
-    console.log(`Trying to connect to already running Chrome on ${endpointUrl}...`);
-    const browser = await chromium.connectOverCDP(endpointUrl);
-    browserContext = browser.contexts()[0];
-    if (!browserContext) browserContext = await browser.newContext();
-    console.log("Successfully connected to running Chrome session!");
-    return browserContext;
-  } catch (error) {
-    console.log("Chrome debugging port is not open. Attempting to automatically start it...");
-
-    if (process.platform === 'win32') {
-      try {
-        console.log("Killing any background Chrome processes to release the profile lock...");
-        execSync('taskkill /F /IM chrome.exe /T', { stdio: 'ignore' });
-      } catch (e) {
-        // Ignore errors
-      }
-
-      const winPaths = [
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-      ];
-      const chromePath = winPaths.find(p => fs.existsSync(p));
-
-      if (!chromePath) throw new Error("Could not find Google Chrome installation.");
-
-      const profileDir = process.env.CHROME_PROFILE_DIR || 'Default';
-      const userDataDir = process.env.CHROME_PROFILE_PATH || `${process.env.LOCALAPPDATA}\\Google\\Chrome\\User Data`;
-
-      console.log(`Launching Chrome from: ${chromePath}`);
-      // Launch without shell:true for safer argument passing
-      const chromeProc = spawn(chromePath, [
-        `--remote-debugging-port=${debuggingPort}`,
+    // We use Playwright's native persistent context but instruct it to use the local Chrome installation
+    browserContext = await chromium.launchPersistentContext(userDataDir, {
+      channel: 'chrome',     // Forces Playwright to use the system's Chrome installation
+      headless: false,       // Headless mode causes profile locks, so we run visible
+      args: [
         `--profile-directory=${profileDir}`,
-        `--user-data-dir=${userDataDir}`,
-        '--no-first-run',
-        '--no-default-browser-check'
-      ], {
-        detached: true,
-        stdio: 'ignore'
-      });
-      chromeProc.unref();
+        '--disable-blink-features=AutomationControlled'
+      ]
+    });
+    console.log("Successfully launched and connected to Chrome!");
+    return browserContext;
+  } catch (err) {
+    if (err.message.includes('has been closed') || err.message.includes('21')) {
+      console.error(`
+=============================================================================
+⛔ FATAL ERROR: CHROME IS STILL RUNNING IN THE BACKGROUND
+=============================================================================
+Google Chrome locks your "User Data" directory while it is running. 
+Even if you closed all Chrome windows, Chrome keeps running hidden in the 
+background (in the System Tray) to receive notifications.
 
-      console.log(`Waiting 5 seconds for Chrome to initialize...`);
-      await new Promise(resolve => setTimeout(resolve, 5000));
+Because it's locked, Playwright cannot take control and crashes with Code 21.
 
-      const isUp = await checkDebuggingPort(endpointUrl);
-      if (!isUp) {
-        throw new Error("Chrome launched, but the debugging port 9222 did not open. It might be blocked by a firewall or another process is locking the profile.");
-      }
-
-      try {
-        const browser = await chromium.connectOverCDP(endpointUrl);
-        browserContext = browser.contexts()[0];
-        if (!browserContext) browserContext = await browser.newContext();
-        console.log("Successfully connected to newly launched Chrome session!");
-        return browserContext;
-      } catch (finalErr) {
-        throw new Error("Port is open, but Playwright failed to connect: " + finalErr.message);
-      }
-    } else {
-      throw new Error(`Please launch Chrome manually with --remote-debugging-port=${debuggingPort}`);
+HOW TO FIX:
+1. Go to the bottom-right corner of your Windows screen (System Tray).
+2. Click the tiny up-arrow to show hidden icons.
+3. Find the Google Chrome icon.
+4. RIGHT-CLICK the Chrome icon and select "Exit".
+5. Run "npm start" again.
+=============================================================================
+`);
+      throw new Error("Profile locked. Please Exit Chrome from the System Tray.");
     }
+    throw err;
   }
 }
 
