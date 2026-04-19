@@ -41,15 +41,21 @@ async function getBrowserContext() {
       }
 
       console.log(`Launching Chrome from: ${chromePath}`);
-      const chromeProc = spawn(`"${chromePath}"`, ['--remote-debugging-port=9222'], {
+      const profileDir = process.env.CHROME_PROFILE_DIR || 'Default';
+      const chromeProc = spawn(`"${chromePath}"`, [
+        '--remote-debugging-port=9222',
+        `--profile-directory=${profileDir}`,
+        '--no-first-run',
+        '--no-default-browser-check'
+      ], {
         detached: true,
         shell: true,
         stdio: 'ignore'
       });
       chromeProc.unref();
 
-      console.log("Waiting 3 seconds for Chrome to initialize...");
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log(`Waiting 5 seconds for Chrome to bypass picker and initialize...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
       try {
         const browser = await chromium.connectOverCDP(endpointUrl);
