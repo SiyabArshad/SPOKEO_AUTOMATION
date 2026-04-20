@@ -23,11 +23,12 @@ if input_mode == "Single Address":
     with col2:
         city = st.text_input("City", value="CUMMING")
         state = st.text_input("State", value="GA")
+        zipcode = st.text_input("Zipcode", value="30041")
 
     if st.button("Run Scraper"):
         with st.spinner("Scraping Spokeo..."):
             try:
-                results = scrape_spokeo(address, city, state)
+                results = scrape_spokeo(address, city, state, zipcode)
                 
                 # Append the DB ID to the results
                 for r in results:
@@ -85,19 +86,21 @@ if input_mode == "Single Address":
                 st.error(str(e))
 
 elif input_mode == "Bulk JSON":
-    st.markdown("Paste a JSON array of objects. Each object must have `id`, `address`, `city`, and `state`.")
+    st.markdown("Paste a JSON array of objects. Each object must have `id`, `address`, `city`, `state`, and `zipcode`.")
     sample_json = '''[
   {
     "id": "101",
     "address": "1255 WESTSHORE DR",
     "city": "CUMMING",
-    "state": "GA"
+    "state": "GA",
+    "zipcode": "30041"
   },
   {
     "id": "102",
     "address": "100 MAIN ST",
     "city": "ATLANTA",
-    "state": "GA"
+    "state": "GA",
+    "zipcode": "30303"
   }
 ]'''
     json_input = st.text_area("JSON Input", value=sample_json, height=300)
@@ -123,12 +126,13 @@ elif input_mode == "Bulk JSON":
                 addr = row.get('address', '')
                 city = row.get('city', '')
                 state = row.get('state', '')
+                zipcode = str(row.get('zipcode', ''))
                 db_id = row.get('id', '')
                 
-                status_text.text(f"Scraping {addr}, {city}, {state}...")
+                status_text.text(f"Scraping {addr}, {city}, {state} {zipcode}...")
                 
                 try:
-                    res = scrape_spokeo(addr, city, state)
+                    res = scrape_spokeo(addr, city, state, zipcode)
                     if res:
                         for r in res:
                             r['id'] = db_id

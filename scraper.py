@@ -19,12 +19,20 @@ LOGIN_URL = "https://www.spokeo.com/login?url=%2F"
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spokeo_profile")
 
 
-def format_url(address, city, state):
-    addr = re.sub(r'[^\w\s-]', '', address.strip())
-    addr = re.sub(r'\s+', '-', addr)
-    city_formatted = '-'.join([w.capitalize() for w in city.strip().lower().split()])
-    state_formatted = state.strip().upper()
-    return f"https://www.spokeo.com/{state_formatted}/{city_formatted}/{addr}"
+def format_url(address, city, state, zipcode=""):
+    addr_slug = re.sub(r'[^\w\s-]', '', address.strip())
+    addr_slug = re.sub(r'\s+', '-', addr_slug)
+    
+    city_trimmed = city.strip()
+    state_trimmed = state.strip().upper()
+    
+    if city_trimmed:
+        city_formatted = '-'.join([w.capitalize() for w in city_trimmed.lower().split()])
+        return f"https://www.spokeo.com/{state_trimmed}/{city_formatted}/{addr_slug}"
+    else:
+        # Fallback to search if city is missing to avoid double slashes and land on the right page via search
+        query = f"{address.strip()} {state_trimmed} {zipcode.strip()}".strip().replace(' ', '+')
+        return f"https://www.spokeo.com/search?q={query}"
 
 
 def get_driver():
@@ -83,8 +91,8 @@ def ensure_logged_in(driver):
         print(f"Already logged in (redirected to: {driver.current_url})")
 
 
-def scrape_spokeo(address, city, state):
-    target_url = format_url(address, city, state)
+def scrape_spokeo(address, city, state, zipcode=""):
+    target_url = format_url(address, city, state, zipcode)
     print(f"Target URL: {target_url}")
 
     driver = get_driver()
