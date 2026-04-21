@@ -110,53 +110,78 @@ def scrape_spokeo(address, city, state, zipcode=""):
             driver.quit()
             return []
 
-        # Extract contacts from specific sections only (Property Owners and Current Residents)
+        # Extract contacts using "Contact Info" as an anchor point
         results = driver.execute_script("""
             const results = [];
-            
-            // Find all section-like containers
-            const containers = document.querySelectorAll('section, [class*="section"], [class*="Section"]');
-            
-            containers.forEach(container => {
-                const header = container.querySelector('h1, h2, h3, h4, .title, [class*="title"]');
-                if (!header) return;
-                
-                const headerText = header.innerText.toLowerCase();
-                // Only process Property Owners and Current Residents
-                if (headerText.includes('property owner') || headerText.includes('current resident')) {
-                    if (headerText.includes('past')) return; // Skip past owners/residents if needed
+            const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.(com|net|org|edu|gov|us|info|biz|co)/gi;
+            const phoneCandidateRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
 
-                    const cards = container.querySelectorAll('article, [class*="card"], [class*="Card"], [class*="profile"]');
-                    cards.forEach(card => {
-                        const nameEl = card.querySelector('h2, h3, h4, .name, [class*="name"], [class*="Name"]');
-                        if (!nameEl) return;
+            // 1. Find all elements that serve as a "Contact Info" header
+            const anchors = Array.from(document.querySelectorAll('*')).filter(el => {
+                const t = (el.innerText || '').trim().toLowerCase();
+                return (t === 'contact info' || t === 'contact information') && el.children.length === 0;
+            });
 
-                        let name = nameEl.innerText.split('\\n')[0].split(',')[0].replace(/Highest Quality/g, '').trim();
-                        if (!name || name.length < 3 || name.toLowerCase().includes('owner') || name.toLowerCase().includes('resident')) return;
-
-                        const cardText = card.innerText || '';
+            anchors.forEach(anchor => {
+                // 2. Traverse up from the anchor to find the container for this person
+                let container = anchor.parentElement;
+                // Go up to 6 levels to find a block containing a name and owner/resident label
+                for (let i = 0; i < 6; i++) {
+                    if (!container || container.tagName === 'BODY') break;
+                    
+                    const text = container.innerText || '';
+                    const lowerText = text.toLowerCase();
+                    
+                    // We only want Current Owners/Residents (skip Past ones)
+                    if ((lowerText.includes('owner') || lowerText.includes('resident')) && !lowerText.includes('past')) {
                         
-                        // Emails
-                        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.(com|net|org|edu|gov|us|info|biz|co)/gi;
-                        const emails = cardText.match(emailRegex) || [];
-
-                        // Phones with strict digit boundary check
-                        const phoneCandidateRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
-                        const matches = cardText.matchAll(phoneCandidateRegex);
-                        const phones = [];
-                        for (const match of matches) {
-                            const start = match.index;
-                            const end = start + match[0].length;
-                            const isPrecededByDigit = start > 0 && /\\d/.test(cardText[start - 1]);
-                            const isFollowedByDigit = end < cardText.length && /\\d/.test(cardText[end]);
-                            if (!isPrecededByDigit && !isFollowedByDigit) {
-                                phones.push(match[0]);
+                        // 3. Extract the person's name
+                        let name = '';
+                        // Strategy A: Look for a header element inside the container
+                        const nameEl = container.querySelector('h1, h2, h3, h4, .name, [class*="name"], [class*="Name"], strong');
+                        if (nameEl && nameEl.innerText.length > 2) {
+                            name = nameEl.innerText.split('\\n')[0].split(',')[0].replace(/Highest Quality/g, '').trim();
+                        }
+                        
+                        // Strategy B: If Strategy A failed or returned a role (like "Current Owner"), 
+                        // parse the text lines for the actual name
+                        if (!name || name.length < 3 || name.toLowerCase().includes('owner') || name.toLowerCase().includes('resident')) {
+                            const lines = text.split('\\n').map(l => l.trim()).filter(l => l);
+                            for (let j = 0; j < lines.length; j++) {
+                                const l = lines[j].toLowerCase();
+                                if (l.includes('owner') || l.includes('resident')) {
+                                    if (j + 1 < lines.length && lines[j+1].length > 2) {
+                                        name = lines[j+1].split(',')[0].replace(/Highest Quality/g, '').trim();
+                                        break;
+                                    }
+                                }
                             }
                         }
 
-                        [...new Set(emails)].forEach(e => results.push({ name, type: 'email', value: e }));
-                        [...new Set(phones)].forEach(p => results.push({ name, type: 'phone', value: p }));
-                    });
+                        // 4. If we have a valid name, extract the contact data from this block
+                        if (name && name.length > 2 && !name.toLowerCase().includes('owner') && !name.toLowerCase().includes('resident')) {
+                            const emails = text.match(emailRegex) || [];
+                            const matches = text.matchAll(phoneCandidateRegex);
+                            const phones = [];
+                            for (const match of matches) {
+                                const start = match.index;
+                                const end = start + match[0].length;
+                                // Digit boundary check to avoid pids/internal IDs
+                                const isPrecededByDigit = start > 0 && /\\d/.test(text[start - 1]);
+                                const isFollowedByDigit = end < text.length && /\\d/.test(text[end]);
+                                if (!isPrecededByDigit && !isFollowedByDigit) {
+                                    phones.push(match[0]);
+                                }
+                            }
+                            
+                            [...new Set(emails)].forEach(e => results.push({ name, type: 'email', value: e }));
+                            [...new Set(phones)].forEach(p => results.push({ name, type: 'phone', value: p }));
+                            
+                            // If we found data, we can stop traversing up for this anchor
+                            if (emails.length > 0 || phones.length > 0) return;
+                        }
+                    }
+                    container = container.parentElement;
                 }
             });
             return results;
