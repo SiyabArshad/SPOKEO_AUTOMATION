@@ -110,58 +110,54 @@ def scrape_spokeo(address, city, state, zipcode=""):
             driver.quit()
             return []
 
-        # Extract contacts
+        # Extract contacts from specific sections only (Property Owners and Current Residents)
         results = driver.execute_script("""
             const results = [];
-            const nameElements = document.querySelectorAll('h2, h3, .name, [class*="Name"], [class*="Title"]');
             
-            nameElements.forEach(nameEl => {
-                let rawName = nameEl.textContent.trim();
-                let name = rawName.split(',')[0].replace('Highest Quality', '').trim();
+            // Find all section-like containers
+            const containers = document.querySelectorAll('section, [class*="section"], [class*="Section"]');
+            
+            containers.forEach(container => {
+                const header = container.querySelector('h1, h2, h3, h4, .title, [class*="title"]');
+                if (!header) return;
                 
-                if (!name || name.length > 50 || name.split(' ').length > 6) return;
+                const headerText = header.innerText.toLowerCase();
+                // Only process Property Owners and Current Residents
+                if (headerText.includes('property owner') || headerText.includes('current resident')) {
+                    if (headerText.includes('past')) return; // Skip past owners/residents if needed
 
-                let card = nameEl.closest('article') || nameEl.closest('[class*="card"]');
-                if (!card && nameEl.parentElement && nameEl.parentElement.parentElement) {
-                    card = nameEl.parentElement.parentElement;
-                }
-                if (!card) return;
+                    const cards = container.querySelectorAll('article, [class*="card"], [class*="Card"], [class*="profile"]');
+                    cards.forEach(card => {
+                        const nameEl = card.querySelector('h2, h3, h4, .name, [class*="name"], [class*="Name"]');
+                        if (!nameEl) return;
 
-                // Spokeo mashes text together when using textContent. 
-                // innerText preserves newlines, which stops regex from grabbing connected words.
-                const cardText = card.innerText || card.textContent || '';
-                
-                // If the matched name is a section header (e.g. "Property Owners (1)"),
-                // we need to find the actual person's name inside the card.
-                if (name.toLowerCase().includes('owner')) {
-                    const lines = cardText.split('\\n').map(l => l.trim()).filter(l => l);
-                    for (let i = 0; i < lines.length; i++) {
-                        const lineLower = lines[i].toLowerCase();
-                        if (lineLower === 'current owner' || lineLower === 'past owner') {
-                            if (i + 1 < lines.length) {
-                                name = lines[i+1].split(',')[0].replace('Highest Quality', '').trim();
+                        let name = nameEl.innerText.split('\\n')[0].split(',')[0].replace(/Highest Quality/g, '').trim();
+                        if (!name || name.length < 3 || name.toLowerCase().includes('owner') || name.toLowerCase().includes('resident')) return;
+
+                        const cardText = card.innerText || '';
+                        
+                        // Emails
+                        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.(com|net|org|edu|gov|us|info|biz|co)/gi;
+                        const emails = cardText.match(emailRegex) || [];
+
+                        // Phones with strict digit boundary check
+                        const phoneCandidateRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
+                        const matches = cardText.matchAll(phoneCandidateRegex);
+                        const phones = [];
+                        for (const match of matches) {
+                            const start = match.index;
+                            const end = start + match[0].length;
+                            const isPrecededByDigit = start > 0 && /\\d/.test(cardText[start - 1]);
+                            const isFollowedByDigit = end < cardText.length && /\\d/.test(cardText[end]);
+                            if (!isPrecededByDigit && !isFollowedByDigit) {
+                                phones.push(match[0]);
                             }
-                            break;
                         }
-                    }
+
+                        [...new Set(emails)].forEach(e => results.push({ name, type: 'email', value: e }));
+                        [...new Set(phones)].forEach(p => results.push({ name, type: 'phone', value: p }));
+                    });
                 }
-
-                // If it's a resident card, or the name is still a header, skip it entirely
-                const cardTextLower = cardText.toLowerCase();
-                const nameLower = name.toLowerCase();
-                if (nameLower.includes('owner') || nameLower.includes('resident') || cardTextLower.includes('resident')) {
-                    return; 
-                }
-
-                // Restrict email regex strictly to known domains to prevent tail-end garbage
-                const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.(com|net|org|edu|gov|us|info|biz|co)/gi;
-                const emails = cardText.match(emailRegex) || [];
-
-                const phoneRegex = /(?:\\+?1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g;
-                const phones = cardText.match(phoneRegex) || [];
-
-                [...new Set(emails)].forEach(e => results.push({ name, type: 'email', value: e }));
-                [...new Set(phones)].forEach(p => results.push({ name, type: 'phone', value: p }));
             });
             return results;
         """)
