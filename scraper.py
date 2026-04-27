@@ -1,6 +1,9 @@
 import os
 import re
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -12,8 +15,8 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Credentials
-SPOKEO_EMAIL = os.environ.get("SPOKEO_EMAIL", "admin@sanjeevanidesifoodhub.com")
-SPOKEO_PASSWORD = os.environ.get("SPOKEO_PASSWORD", "Developer@3690")
+SPOKEO_EMAIL = os.environ.get("SPOKEO_EMAIL")
+SPOKEO_PASSWORD = os.environ.get("SPOKEO_PASSWORD")
 
 LOGIN_URL = "https://www.spokeo.com/login?url=%2F"
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spokeo_profile")
@@ -59,6 +62,9 @@ def ensure_logged_in(driver):
     - If the login form appears → fill credentials and submit.
     - If already logged in → Spokeo redirects us away from /login automatically.
     """
+    if not SPOKEO_EMAIL or not SPOKEO_PASSWORD:
+        raise ValueError("Spokeo credentials not found. Please set SPOKEO_EMAIL and SPOKEO_PASSWORD in your .env file.")
+
     print("Navigating to Spokeo login page...")
     driver.get(LOGIN_URL)
     time.sleep(4)
