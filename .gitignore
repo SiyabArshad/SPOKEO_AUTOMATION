@@ -28,3 +28,4 @@ spokeo_profile/
 .Trashes
 ehthumbs.db
 Thumbs.db
+.env
