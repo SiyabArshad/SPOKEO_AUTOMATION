@@ -8,6 +8,7 @@ __pycache__/
 venv/
 .venv/
 env/
+.env
 .env/
 ENV/
 env.bak/
@@ -27,3 +28,4 @@ spokeo_profile/
 .Trashes
 ehthumbs.db
 Thumbs.db
+.env
